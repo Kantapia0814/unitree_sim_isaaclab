@@ -11,6 +11,11 @@ def create_dds_objects(args_cli,env):
         dds_manager.register_object("g129", g1_robot)
         publish_names.append("g129")
         subscribe_names.append("g129")
+        # Add OdoState + SecondaryIMU publishers for GR00T-WBC integration
+        from dds.odo_imu_dds import OdoImuDDS
+        odo_imu = OdoImuDDS()
+        dds_manager.register_object("odo_imu", odo_imu)
+        publish_names.append("odo_imu")
     if args_cli.enable_dex3_dds:
         from dds.dex3_dds import Dex3DDS
         dex3 = Dex3DDS() 

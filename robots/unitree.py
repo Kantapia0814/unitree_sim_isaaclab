@@ -586,8 +586,8 @@ G129_CFG_WITH_DEX1_WHOLEBODY = ArticulationCfg(
                 ".*_hip_pitch_joint": 88.0,
                 ".*_knee_joint": 139.0,
                 ".*waist_yaw_joint": 88.0,
-                ".*waist_roll_joint": 35.0,
-                ".*waist_pitch_joint": 35.0,
+                ".*waist_roll_joint": 50.0,   # MuJoCo actuatorfrcrange: ±50
+                ".*waist_pitch_joint": 50.0,  # MuJoCo actuatorfrcrange: ±50
             },
             velocity_limit_sim={
                 ".*_hip_yaw_joint": 32.0,
@@ -617,8 +617,8 @@ G129_CFG_WITH_DEX1_WHOLEBODY = ArticulationCfg(
         "feet": ImplicitActuatorCfg(
             joint_names_expr=[".*_ankle_pitch_joint", ".*_ankle_roll_joint"],
             effort_limit_sim={
-                ".*_ankle_pitch_joint": 35.0,
-                ".*_ankle_roll_joint": 35.0,
+                ".*_ankle_pitch_joint": 50.0,  # MuJoCo actuatorfrcrange: ±50
+                ".*_ankle_roll_joint": 50.0,   # MuJoCo actuatorfrcrange: ±50
             },
             velocity_limit_sim={
                 ".*_ankle_pitch_joint": 30.0,
@@ -763,8 +763,8 @@ G129_CFG_WITH_DEX3_WHOLEBODY = ArticulationCfg(
                 ".*_hip_pitch_joint": 88.0,
                 ".*_knee_joint": 139.0,
                 ".*waist_yaw_joint": 88.0,
-                ".*waist_roll_joint": 35.0,
-                ".*waist_pitch_joint": 35.0,
+                ".*waist_roll_joint": 50.0,   # MuJoCo actuatorfrcrange: ±50
+                ".*waist_pitch_joint": 50.0,  # MuJoCo actuatorfrcrange: ±50
             },
             velocity_limit_sim={
                 ".*_hip_yaw_joint": 32.0,
@@ -794,8 +794,8 @@ G129_CFG_WITH_DEX3_WHOLEBODY = ArticulationCfg(
         "feet": ImplicitActuatorCfg(
             joint_names_expr=[".*_ankle_pitch_joint", ".*_ankle_roll_joint"],
             effort_limit_sim={
-                ".*_ankle_pitch_joint": 35.0,
-                ".*_ankle_roll_joint": 35.0,
+                ".*_ankle_pitch_joint": 50.0,  # MuJoCo actuatorfrcrange: ±50
+                ".*_ankle_roll_joint": 50.0,   # MuJoCo actuatorfrcrange: ±50
             },
             velocity_limit_sim={
                 ".*_ankle_pitch_joint": 30.0,
@@ -955,8 +955,8 @@ G129_CFG_WITH_INSPIRE_WHOLEBODY = ArticulationCfg(
                 ".*_hip_pitch_joint": 88.0,
                 ".*_knee_joint": 139.0,
                 ".*waist_yaw_joint": 88.0,
-                ".*waist_roll_joint": 35.0,
-                ".*waist_pitch_joint": 35.0,
+                ".*waist_roll_joint": 50.0,   # MuJoCo actuatorfrcrange: ±50
+                ".*waist_pitch_joint": 50.0,  # MuJoCo actuatorfrcrange: ±50
             },
             velocity_limit_sim={
                 ".*_hip_yaw_joint": 32.0,
@@ -986,8 +986,8 @@ G129_CFG_WITH_INSPIRE_WHOLEBODY = ArticulationCfg(
         "feet": ImplicitActuatorCfg(
             joint_names_expr=[".*_ankle_pitch_joint", ".*_ankle_roll_joint"],
             effort_limit_sim={
-                ".*_ankle_pitch_joint": 35.0,
-                ".*_ankle_roll_joint": 35.0,
+                ".*_ankle_pitch_joint": 50.0,  # MuJoCo actuatorfrcrange: ±50
+                ".*_ankle_roll_joint": 50.0,   # MuJoCo actuatorfrcrange: ±50
             },
             velocity_limit_sim={
                 ".*_ankle_pitch_joint": 30.0,

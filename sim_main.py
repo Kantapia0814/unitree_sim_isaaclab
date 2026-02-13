@@ -53,6 +53,7 @@ parser.add_argument("--profile_interval", type=int, default=500, help="performan
 parser.add_argument("--model_path", type=str, default="assets/model/policy.onnx", help="model path")
 parser.add_argument("--reward_interval", type=int, default=10, help="step interval for reward calculation")
 parser.add_argument("--enable_wholebody_dds", action="store_true", default=False, help="enable wh dds")
+parser.add_argument("--enable_fullbody_dds", action="store_true", default=False, help="enable full body DDS control from GR00T-WBC (all 29 joints via rt/lowcmd)")
 
 parser.add_argument("--physics_dt", type=float, default=None, help="physics time step, e.g., 0.005")
 parser.add_argument("--render_interval", type=int, default=None, help="render interval steps (>=1)")
@@ -405,7 +406,15 @@ def main():
     print(f"\ncreate action provider: {args_cli.action_source}...")
     try:
         print(f"args_cli.task: {args_cli.task}")
-        if not args_cli.replay_data and ("Wholebody" in args_cli.task or args_cli.enable_wholebody_dds):
+        if args_cli.enable_fullbody_dds:
+            # GR00T-WBC full body mode: use Wholebody provider (RL balance fallback)
+            # then hand over to GR00T-WBC when it connects via rt/lowcmd
+            args_cli.action_source = "dds_wholebody"
+            args_cli.enable_wholebody_dds = True
+            control_config.use_rl_action_mode = True
+            print("========= GR00T-WBC full body DDS mode enabled =========")
+            print("RL balance policy active until GR00T-WBC connects via rt/lowcmd")
+        elif not args_cli.replay_data and ("Wholebody" in args_cli.task or args_cli.enable_wholebody_dds):
             args_cli.action_source = "dds_wholebody"
             args_cli.enable_wholebody_dds = True
             control_config.use_rl_action_mode = True

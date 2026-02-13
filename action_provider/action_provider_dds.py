@@ -13,6 +13,7 @@ class DDSActionProvider(ActionProvider):
         self.enable_gripper = args_cli.enable_dex1_dds
         self.enable_dex3 = args_cli.enable_dex3_dds
         self.enable_inspire = args_cli.enable_inspire_dds
+        self.full_body_mode = getattr(args_cli, 'enable_fullbody_dds', False)
         self.env = env
         # Initialize DDS communication
         self.robot_dds = None
@@ -59,12 +60,59 @@ class DDSActionProvider(ActionProvider):
                 "right_wrist_pitch_joint": 12,
                 "right_wrist_yaw_joint": 13
             }
+            # Full body mapping: GR00T-WBC motor index -> Isaac Sim joint name
+            # Maps all 29 joints from rt/lowcmd positions array
+            self.fullbody_joint_mapping = {
+                # Legs (motor indices 0-11)
+                "left_hip_yaw_joint": 0,
+                "left_hip_roll_joint": 1,
+                "left_hip_pitch_joint": 2,
+                "left_knee_joint": 3,
+                "left_ankle_pitch_joint": 4,
+                "left_ankle_roll_joint": 5,
+                "right_hip_yaw_joint": 6,
+                "right_hip_roll_joint": 7,
+                "right_hip_pitch_joint": 8,
+                "right_knee_joint": 9,
+                "right_ankle_pitch_joint": 10,
+                "right_ankle_roll_joint": 11,
+                # Waist (motor indices 12-14)
+                "waist_yaw_joint": 12,
+                "waist_roll_joint": 13,
+                "waist_pitch_joint": 14,
+                # Arms (motor indices 15-28)
+                "left_shoulder_pitch_joint": 15,
+                "left_shoulder_roll_joint": 16,
+                "left_shoulder_yaw_joint": 17,
+                "left_elbow_joint": 18,
+                "left_wrist_roll_joint": 19,
+                "left_wrist_pitch_joint": 20,
+                "left_wrist_yaw_joint": 21,
+                "right_shoulder_pitch_joint": 22,
+                "right_shoulder_roll_joint": 23,
+                "right_shoulder_yaw_joint": 24,
+                "right_elbow_joint": 25,
+                "right_wrist_roll_joint": 26,
+                "right_wrist_pitch_joint": 27,
+                "right_wrist_yaw_joint": 28,
+            }
             self.all_joint_names = self.env.scene["robot"].data.joint_names
             self.joint_to_index = {name: i for i, name in enumerate(self.all_joint_names)}
             self.arm_action_pose = [self.joint_to_index[name] for name in self.arm_joint_mapping.keys()]
             self.arm_action_pose_indices = [self.arm_joint_mapping[name] for name in self.arm_joint_mapping.keys()]
             self._arm_target_indices = [self.joint_to_index[name] for name in self.arm_joint_mapping.keys()]
             self._arm_source_indices = [idx + 15 for idx in self.arm_joint_mapping.values()]  # source data from positions[15:]
+            # Full body indices (for GR00T-WBC mode)
+            if self.full_body_mode:
+                self._fb_target_indices = []
+                self._fb_source_indices = []
+                for jname, motor_idx in self.fullbody_joint_mapping.items():
+                    if jname in self.joint_to_index:
+                        self._fb_target_indices.append(self.joint_to_index[jname])
+                        self._fb_source_indices.append(motor_idx)
+                    else:
+                        print(f"[{self.name}] Warning: joint '{jname}' not found in Isaac Sim, skipping")
+                print(f"[{self.name}] Full body mode: mapped {len(self._fb_target_indices)}/29 joints")
         elif self.enable_robot == "h1_2":
             self.arm_joint_mapping = {
                 "left_shoulder_pitch_joint": 0,
@@ -180,7 +228,16 @@ class DDSActionProvider(ActionProvider):
             self._inspire_special_source_idx_t = torch.tensor(self._inspire_special_source_indices, dtype=torch.long, device=device)
             self._inspire_special_scales_t = self._inspire_special_scales.to(device)
         
+        # Full body mode tensors
+        if self.full_body_mode and hasattr(self, '_fb_target_indices'):
+            self._fb_target_idx_t = torch.tensor(self._fb_target_indices, dtype=torch.long, device=device)
+            self._fb_source_idx_t = torch.tensor(self._fb_source_indices, dtype=torch.long, device=device)
+        
         self._full_action_buf = torch.zeros(len(self.all_joint_names), device=device, dtype=torch.float32)
+        # Cache default joint positions for full body mode (avoid zeroing legs)
+        if self.full_body_mode:
+            self._default_joint_pos = self.env.scene["robot"].data.default_joint_pos[0].clone()
+            print(f"[{self.name}] Default joint positions cached for full body mode")
         self._positions_buf = torch.empty(29, device=device, dtype=torch.float32)
         if self.enable_gripper:
             self._gripper_buf = torch.empty(2, device=device, dtype=torch.float32)
@@ -193,9 +250,18 @@ class DDSActionProvider(ActionProvider):
     def get_action(self, env) -> Optional[torch.Tensor]:
         """Get action from DDS"""
         try:
+            # ============================================================
+            # FULL BODY MODE (GR00T-WBC): separate logic path
+            # ============================================================
+            if self.full_body_mode:
+                return self._get_action_fullbody(env)
 
+            # ============================================================
+            # NORMAL MODE: original arm-only logic
+            # ============================================================
             full_action = self._full_action_buf
             full_action.zero_()
+
             if self.enable_robot == "g129" and self.robot_dds:
                 cmd_data = self.robot_dds.get_robot_command()
                 if cmd_data and 'motor_cmd' in cmd_data:
@@ -212,6 +278,7 @@ class DDSActionProvider(ActionProvider):
                         self._positions_buf[:29].copy_(torch.tensor(positions[:29], dtype=torch.float32, device=self.env.device))
                         arm_vals = self._positions_buf.index_select(0, self._arm_source_idx_t)
                         full_action.index_copy_(0, self._arm_target_idx_t, arm_vals)
+
             # Get gripper command
             if self.gripper_dds:
                 gripper_cmd = self.gripper_dds.get_gripper_command()
@@ -225,7 +292,6 @@ class DDSActionProvider(ActionProvider):
                         self._gripper_buf.copy_(torch.tensor(gripper_positions[:2], dtype=torch.float32, device=self.env.device))
                         gp_vals = self._gripper_buf.index_select(0, self._gripper_source_idx_t)
                         full_action.index_copy_(0, self._gripper_target_idx_t, gp_vals)
-             
             elif self.dex3_dds:
                 hand_cmds = self.dex3_dds.get_hand_commands()
                 if hand_cmds:
@@ -256,6 +322,84 @@ class DDSActionProvider(ActionProvider):
         except Exception as e:
             print(f"[{self.name}] Get DDS action failed: {e}")
             return None
+
+    def _get_action_fullbody(self, env) -> Optional[torch.Tensor]:
+        """Full body mode: GR00T-WBC controls all 29 joints via DDS.
+        
+        While waiting for GR00T-WBC, physics runs at default position so that
+        IMU/gravity/joint state data stays valid for DDS publishing.
+        When GR00T-WBC connects, control is handed over immediately (no blending).
+        """
+        # --- Initialize state on first call ---
+        if not hasattr(self, '_fb_dds_connected'):
+            self._fb_dds_connected = False
+            self._fb_wait_count = 0
+            self._fb_step_count = 0
+            print(f"\n{'='*60}")
+            print(f"[{self.name}] FULL BODY MODE ACTIVE")
+            print(f"[{self.name}] Running physics at default pose while waiting for GR00T-WBC...")
+            print(f"[{self.name}] Joint count: {len(self.all_joint_names)}")
+            print(f"[{self.name}] Mapped joints: {len(self._fb_target_indices)}/29")
+            print(f"[{self.name}] Default pos[:6] (legs): {self._default_joint_pos[:6].tolist()}")
+            print(f"[{self.name}] Start GR00T-WBC now. DO NOT press movement keys yet!")
+            print(f"{'='*60}\n")
+
+        # --- Read DDS command from GR00T-WBC ---
+        has_valid_cmd = False
+        positions = None
+        if self.enable_robot == "g129" and self.robot_dds:
+            cmd_data = self.robot_dds.get_robot_command()
+            if cmd_data and 'motor_cmd' in cmd_data:
+                positions = cmd_data['motor_cmd']['positions']
+                if len(positions) >= 29:
+                    has_valid_cmd = True
+
+        # --- Determine target joint positions ---
+        full_action = self._full_action_buf
+        full_action.copy_(self._default_joint_pos)
+
+        if not self._fb_dds_connected:
+            if has_valid_cmd:
+                self._fb_dds_connected = True
+                print(f"\n{'='*60}")
+                print(f"[{self.name}] GR00T-WBC CONNECTED!")
+                print(f"[{self.name}] Handing over control to GR00T-WBC.")
+                print(f"[{self.name}] WBC positions[:6]: {positions[:6]}")
+                print(f"[{self.name}] Isaac default[:6]:  {self._default_joint_pos[:6].tolist()}")
+                print(f"{'='*60}\n")
+                # Apply WBC command immediately
+                self._positions_buf[:29].copy_(torch.tensor(positions[:29], dtype=torch.float32, device=self.env.device))
+                fb_vals = self._positions_buf.index_select(0, self._fb_source_idx_t)
+                full_action.index_copy_(0, self._fb_target_idx_t, fb_vals)
+            else:
+                # Not connected yet: hold default position (physics keeps running)
+                self._fb_wait_count += 1
+                if self._fb_wait_count % 100 == 1:
+                    print(f"[{self.name}] Waiting for GR00T-WBC... ({self._fb_wait_count} iterations)")
+                # full_action already has default_joint_pos
+        else:
+            # Connected: apply WBC commands
+            if has_valid_cmd:
+                self._positions_buf[:29].copy_(torch.tensor(positions[:29], dtype=torch.float32, device=self.env.device))
+                fb_vals = self._positions_buf.index_select(0, self._fb_source_idx_t)
+                full_action.index_copy_(0, self._fb_target_idx_t, fb_vals)
+            # else: no command this frame, hold default position
+
+        self._fb_step_count += 1
+        if self._fb_step_count % 500 == 1:
+            connected_str = "WBC" if self._fb_dds_connected else "DEFAULT"
+            print(f"[{self.name}] Step #{self._fb_step_count}, mode: {connected_str}, has_cmd: {has_valid_cmd}")
+
+        # Step simulation (same pattern as DDSRLActionProvider)
+        # Physics ALWAYS runs - ensures valid IMU/gravity/state for DDS publishing
+        for _ in range(4):
+            self.env.scene["robot"].set_joint_position_target(full_action)
+            self.env.scene.write_data_to_sim()
+            self.env.sim.step(render=False)
+            self.env.scene.update(dt=self.env.physics_dt)
+        self.env.sim.render()
+        self.env.observation_manager.compute()
+        return None
     
     def _convert_to_joint_range(self, value):
         """Convert gripper control value to joint angle"""

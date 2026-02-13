@@ -107,6 +107,9 @@ _imu_acc_cache = {
     "initialized": False,
 }
 
+_odo_imu_dds = None
+_odo_imu_dds_initialized = False
+
 def _get_g1_robot_dds_instance():
     """get the DDS instance, delay initialization"""
     global _g1_robot_dds, _dds_initialized
@@ -138,6 +141,23 @@ def _get_g1_robot_dds_instance():
         _dds_initialized = True
     
     return _g1_robot_dds
+
+def _get_odo_imu_dds_instance():
+    """Get the OdoImu DDS instance for publishing rt/odostate and rt/secondary_imu"""
+    global _odo_imu_dds, _odo_imu_dds_initialized
+    
+    if not _odo_imu_dds_initialized or _odo_imu_dds is None:
+        try:
+            from dds.dds_master import dds_manager
+            _odo_imu_dds = dds_manager.get_object("odo_imu")
+            if _odo_imu_dds:
+                print("[g1_state] OdoImu DDS instance obtained")
+        except Exception as e:
+            print(f"[g1_state] Failed to get OdoImu DDS instance: {e}")
+            _odo_imu_dds = None
+        _odo_imu_dds_initialized = True
+    
+    return _odo_imu_dds
 
 def get_robot_boy_joint_states(
     env: ManagerBasedRLEnv,
@@ -211,7 +231,13 @@ def get_robot_boy_joint_states(
             if now_ms - _obs_cache["dds_last_ms"] >= _obs_cache["dds_min_interval_ms"]:
                 g1_robot_dds = _get_g1_robot_dds_instance()
                 if g1_robot_dds:
-                    imu_data = get_robot_imu_data(env)
+                    # CRITICAL: use ROOT body (pelvis) for the primary IMU published via
+                    # rt/lowstate.imu_state.  GR00T-WBC's MuJoCo bridge publishes
+                    # mj_data.qpos[:7]  (root quat) and mj_data.qvel[3:6] (root body-frame
+                    # angular velocity) as the primary IMU.  Using the torso would mismatch
+                    # the gravity-projection the policy was trained with and cause instability.
+                    # quat_w_first=True: Isaac Lab root_state_w uses [w,x,y,z] convention.
+                    imu_data = get_robot_imu_data(env, use_torso_imu=False, quat_w_first=True)
                     if imu_data.shape[0] > 0:
                         g1_robot_dds.write_robot_state(
                             pos_buf[0].contiguous().cpu().numpy(),
@@ -220,6 +246,31 @@ def get_robot_boy_joint_states(
                             imu_data[0].contiguous().cpu().numpy(),
                         )
                         _obs_cache["dds_last_ms"] = now_ms
+
+                # Write OdoState + SecondaryIMU for GR00T-WBC
+                odo_imu_dds = _get_odo_imu_dds_instance()
+                if odo_imu_dds:
+                    data = env.scene["robot"].data
+                    # Root state: [pos(3), quat_wxyz(4), lin_vel_w(3), ang_vel_w(3)] = 13
+                    # Isaac Lab root_state_w uses [w,x,y,z] quaternion convention.
+                    root_state_np = data.root_state_w[0].cpu().numpy()
+
+                    # Torso IMU: quaternion + angular velocity for secondary_imu
+                    try:
+                        body_names = data.body_names
+                        torso_idx = body_names.index("imu_in_torso")
+                        torso_pose = data.body_link_pose_w[0, torso_idx]  # [7]: pos(3)+quat_wxyz(4)
+                        torso_vel = data.body_link_vel_w[0, torso_idx]    # [6]: lin(3)+ang(3)
+                        # Isaac Lab body_link_pose_w also uses [w,x,y,z] quaternion convention
+                        torso_quat_wxyz = torso_pose[3:7]
+                        torso_ang_vel = torso_vel[3:6]
+                        torso_imu_np = torch.cat([torso_quat_wxyz, torso_ang_vel]).cpu().numpy()
+                    except (ValueError, IndexError):
+                        # Fallback: use root state data for torso
+                        torso_imu_np = root_state_np[3:10].copy()  # quat(4)+lin_vel(3) as placeholder
+
+                    odo_imu_dds.write_odo_imu_state(root_state_np, torso_imu_np)
+
         except Exception as e:
             print(f"[g1_state] Error writing robot state to DDS: {e}")
     
